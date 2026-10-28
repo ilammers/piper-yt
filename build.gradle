@@ -1,0 +1,52 @@
+plugins {
+    id 'application'
+}
+
+group = 'io.github.piper_yt'
+version = '0.1.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://jitpack.io' }
+}
+
+dependencies {
+    implementation 'com.github.InfinityLoop1308.PipePipeExtractor:extractor'
+    implementation 'io.github.jwharm.javagi:adw:0.12.2'
+    implementation 'com.squareup.okhttp3:okhttp:5.4.0'
+    implementation 'org.jsoup:jsoup:1.22.2'
+    // Bundled with Android, so the extractor only declares it compileOnly. Also used for
+    // the JSON export.
+    implementation 'org.json:json:20260522'
+    // The local library (favorites, playlists, history, downloads)
+    implementation 'org.xerial:sqlite-jdbc:3.53.4.0'
+    compileOnly 'com.github.spotbugs:spotbugs-annotations:4.10.2'
+
+    testImplementation platform('org.junit:junit-bom:6.1.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    // sqlite-jdbc loads its bundled native library
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+application {
+    mainClass = 'io.github.piper_yt.piperyt.Main'
+    // java-gi calls into GTK through the Foreign Function & Memory API
+    // Video frames are drawn on GTK's main thread, so GC pauses show up as stutter; ZGC keeps
+    // them under a millisecond
+    applicationDefaultJvmArgs = ['--enable-native-access=ALL-UNNAMED', '-XX:+UseZGC']
+}

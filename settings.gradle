@@ -1,0 +1,5 @@
+rootProject.name = 'piper-yt'
+
+// Build the extractor from the local checkout; Gradle substitutes it for the
+// com.github.InfinityLoop1308.PipePipeExtractor:extractor dependency below.
+includeBuild 'PipePipeExtractor'

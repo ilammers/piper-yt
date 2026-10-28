@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Piper
+GenericName=YouTube Client
+Comment=PipePipe for Linux: watch YouTube without an account, ads or tracking
+Exec=@BIN@
+Icon=multimedia-video-player
+Terminal=false
+Categories=AudioVideo;Video;Player;Network;
+Keywords=youtube;video;stream;pipepipe;newpipe;
+StartupWMClass=io.github.piper_yt.PiperYT

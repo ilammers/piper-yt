@@ -1,0 +1,29 @@
+# Build output and caches
+.gradle/
+build/
+PipePipeExtractor/.gradle/
+PipePipeExtractor/**/build/
+.kotlin/
+
+# IDEs and editors
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+*.swp
+*~
+.DS_Store
+
+# JVM crash logs: they hold the environment, paths and user name of whoever crashed
+hs_err_pid*.log
+replay_pid*.log
+
+# Never commit a library, backups or exports: they hold watch history and subscriptions
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.zip
+library.db*
