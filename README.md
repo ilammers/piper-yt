@@ -104,5 +104,6 @@ embedding libmpv, and more). Run `./gradlew test` before sending changes.
 
 ## License
 
-Piper-YT is free software under the [GNU General Public License v3.0](LICENSE). The
-bundled PipePipeExtractor is also GPLv3 (see `PipePipeExtractor/LICENSE`).
+Piper-YT is free software under the [GNU General Public License v3.0](LICENSE).
+
+The bundled PipePipeExtractor is also GPLv3 (see `PipePipeExtractor/LICENSE`).
