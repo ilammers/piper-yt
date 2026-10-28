@@ -137,8 +137,8 @@ final class Preferences {
         final EntryRow subs = new EntryRow();
         subs.setTitle("Subtitle languages, e.g. \"en, de\" (blank: off)");
         subs.setText(Settings.getString(Settings.PLAYER_SUB_LANGS));
-        subs.setShowApplyButton(true);
-        subs.onApply(() -> Settings.set(Settings.PLAYER_SUB_LANGS, subs.getText().strip()));
+        // Saved as you type: an unapplied entry looked set but left subtitles off
+        subs.onChanged(() -> Settings.set(Settings.PLAYER_SUB_LANGS, subs.getText().strip()));
         group.add(subs);
         return group;
     }
