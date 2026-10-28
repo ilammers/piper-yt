@@ -21,8 +21,8 @@ import java.io.UncheckedIOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Plays inside the window: libmpv renders into a {@link GLArea}, and mouse and keyboard input
@@ -81,9 +81,13 @@ final class PlayerView {
     private Thread events;
     private volatile boolean closing;
     private volatile List<MpvPlayer.SkipSegment> skipSegments = List.of();
-    /** Subtitles for the file being loaded, added (by the event thread) once it has. */
-    private final AtomicReference<List<Subtitles.Track>> pendingSubtitles =
-            new AtomicReference<>(List.of());
+    // Subtitles arrive (from yt-dlp) while the file plays; guarded by subtitleLock
+    private final Object subtitleLock = new Object();
+    private long subtitleGeneration;
+    private String subtitleUrl;
+    private boolean subtitleFileLoaded;
+    private List<Subtitles.Track> readySubtitles = List.of();
+    private CompletableFuture<List<Subtitles.Track>> subtitleFetch;
     private boolean fullscreen;
     private final boolean controls;
     private String videoTrack;
@@ -154,7 +158,7 @@ final class PlayerView {
                 source.coverUrl() == null ? List.of() : List.of(source.coverUrl()));
         videoTrack = null;
         mpv.setProperty("vid", source.noVideo() ? "no" : "auto");
-        pendingSubtitles.set(source.noVideo() ? List.of() : source.subtitles());
+        expectSubtitles(source);
         mpv.command("loadfile", source.url());
         mpv.setProperty("pause", "no");
         area.grabFocus();
@@ -225,6 +229,11 @@ final class PlayerView {
             return;
         }
         Mpris.released(this);
+        // The fetch isn't cancelled: the mini player may be taking this video over
+        synchronized (subtitleLock) {
+            subtitleFetch = null;
+            subtitleGeneration++;
+        }
         closing = true;
         mpv.wakeup();
         try {
@@ -326,7 +335,7 @@ final class PlayerView {
                         Ui.runOnMain(listener::ended);
                     }
                 }
-                case Mpv.EVENT_FILE_LOADED -> addSubtitles(core);
+                case Mpv.EVENT_FILE_LOADED -> fileLoaded(core);
                 case Mpv.EVENT_END_FILE -> {
                     if (event.endReason() == Mpv.END_FILE_REASON_ERROR) {
                         final String error = Mpv.errorString(event.endError());
@@ -339,8 +348,55 @@ final class PlayerView {
         }
     }
 
-    private void addSubtitles(final Mpv core) {
-        for (final Subtitles.Track t : pendingSubtitles.getAndSet(List.of())) {
+    /** Drops the last video's subtitles (stopping their fetch) and waits for {@code source}'s. */
+    private void expectSubtitles(final MpvPlayer.Source source) {
+        final long generation;
+        final CompletableFuture<List<Subtitles.Track>> fetch = source.subtitles();
+        synchronized (subtitleLock) {
+            if (subtitleFetch != null && subtitleFetch != fetch) {
+                subtitleFetch.cancel(true);
+            }
+            generation = ++subtitleGeneration;
+            subtitleUrl = source.url();
+            subtitleFileLoaded = false;
+            readySubtitles = List.of();
+            subtitleFetch = fetch;
+        }
+        if (source.noVideo()) {
+            return;
+        }
+        fetch.thenAccept(tracks -> {
+            // Under the lock, so dispose can't destroy mpv mid-add
+            synchronized (subtitleLock) {
+                if (generation != subtitleGeneration || tracks.isEmpty()) {
+                    return;
+                }
+                if (!subtitleFileLoaded) {
+                    readySubtitles = tracks;
+                } else if (mpv != null && !closing) {
+                    addSubtitles(mpv, tracks);
+                }
+            }
+        });
+    }
+
+    /** Event thread: adds subtitles that arrived before the file finished loading. */
+    private void fileLoaded(final Mpv core) {
+        final List<Subtitles.Track> tracks;
+        synchronized (subtitleLock) {
+            // A late event for the file before can't take this one's subtitles
+            if (subtitleUrl == null || !subtitleUrl.equals(core.getProperty("path"))) {
+                return;
+            }
+            subtitleFileLoaded = true;
+            tracks = readySubtitles;
+            readySubtitles = List.of();
+        }
+        addSubtitles(core, tracks);
+    }
+
+    private void addSubtitles(final Mpv core, final List<Subtitles.Track> tracks) {
+        for (final Subtitles.Track t : tracks) {
             try {
                 core.command("sub-add", t.location(), t.select() ? "select" : "auto",
                         t.title(), t.lang() == null ? "" : t.lang());

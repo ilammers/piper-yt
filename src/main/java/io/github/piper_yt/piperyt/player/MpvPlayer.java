@@ -24,6 +24,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -158,14 +159,15 @@ public final class MpvPlayer {
 
     /**
      * What to play: {@code url} plus, for YouTube's split streams, a separate audio track.
-     * {@code coverUrl} is shown as the picture for audio-only playback. {@code subtitles} are
-     * added once the file has loaded.
+     * {@code coverUrl} is shown as the picture for audio-only playback. {@code subtitles}
+     * arrive while it plays, and are added when they do.
      */
     public record Source(String title, String url, String audioUrl, String coverUrl,
-                         boolean noVideo, List<Subtitles.Track> subtitles) {
+                         boolean noVideo, CompletableFuture<List<Subtitles.Track>> subtitles) {
         public Source(final String title, final String url, final String audioUrl,
                       final String coverUrl, final boolean noVideo) {
-            this(title, url, audioUrl, coverUrl, noVideo, List.of());
+            this(title, url, audioUrl, coverUrl, noVideo,
+                    CompletableFuture.completedFuture(List.of()));
         }
     }
 
@@ -193,7 +195,7 @@ public final class MpvPlayer {
         final AudioStream audio = video.isVideoOnly() ? bestAudio(info) : null;
         return new Source(title, video.getContent(),
                 audio == null ? null : audio.getContent(), null, false,
-                Subtitles.tracks(info, Settings.getString(Settings.PLAYER_SUB_LANGS)));
+                Subtitles.fetch(info, Settings.getString(Settings.PLAYER_SUB_LANGS)));
     }
 
     public static List<SkipSegment> skipSegments(final StreamInfo info) {
@@ -249,13 +251,18 @@ public final class MpvPlayer {
         if (startSeconds > 0) {
             cmd.add(String.format(Locale.ROOT, "--start=%.1f", startSeconds));
         }
-        cmd.add("--script=" + externalScript(skip, source.subtitles()));
+        final Path subtitles = Files.createTempFile("piper-subs-", ".tsv");
+        Files.delete(subtitles);
+        subtitles.toFile().deleteOnExit();
+        cmd.add("--script=" + externalScript(skip, subtitles));
         cmd.add(source.url());
 
         final Process process = new ProcessBuilder(cmd)
                 .redirectError(ProcessBuilder.Redirect.INHERIT)
                 .start();
         Thread.ofVirtual().name("mpv-progress").start(() -> readProgress(process, progress));
+        source.subtitles().thenAccept(tracks -> writeSubtitleList(subtitles, tracks));
+        process.onExit().thenRun(() -> source.subtitles().cancel(true));
     }
 
     /** Reads the script's progress lines until mpv exits; mpv's own output is dropped. */
@@ -278,30 +285,31 @@ public final class MpvPlayer {
     }
 
     /**
-     * Writes a throwaway Lua script for external mpv: skips the segments, and prints the
-     * position for {@link #readProgress} every few seconds, on pause and on quit.
+     * Writes a throwaway Lua script for external mpv: skips the segments, adds the subtitles
+     * once {@code subtitles} lists them, and prints the position for {@link #readProgress} every few seconds, on pause and on quit.
      */
-    private static String externalScript(final List<SkipSegment> skip,
-                                         final List<Subtitles.Track> subtitles)
+    private static String externalScript(final List<SkipSegment> skip, final Path subtitles)
             throws IOException {
         final StringBuilder lua = new StringBuilder("local segments = {\n");
         for (final SkipSegment s : skip) {
             lua.append(String.format(Locale.ROOT, "  {%.3f, %.3f, \"%s\"},%n",
                     s.start(), s.end(), s.label()));
         }
-        lua.append("}\nlocal subtitles = {\n");
-        for (final Subtitles.Track t : subtitles) {
-            lua.append("  {").append(luaString(t.location())).append(", ")
-                    .append(luaString(t.select() ? "select" : "auto")).append(", ")
-                    .append(luaString(t.title())).append(", ")
-                    .append(luaString(t.lang() == null ? "" : t.lang())).append("},\n");
-        }
+        lua.append("}\nlocal subtitles = ").append(luaString(subtitles.toString()));
         lua.append("""
-                }
-                mp.register_event("file-loaded", function()
-                    for _, s in ipairs(subtitles) do
-                        mp.commandv("sub-add", s[1], s[2], s[3], s[4])
+
+                -- The app writes the subtitle list once yt-dlp has fetched them
+                local subs_timer
+                subs_timer = mp.add_periodic_timer(1, function()
+                    if not mp.get_property("path") then return end
+                    local f = io.open(subtitles, "r")
+                    if not f then return end
+                    for line in f:lines() do
+                        local file, flag, title, lang = line:match("^(.-)\t(.-)\t(.-)\t(.*)$")
+                        if file then mp.commandv("sub-add", file, flag, title, lang) end
                     end
+                    f:close()
+                    subs_timer:kill()
                 end)
                 mp.observe_property("time-pos", "number", function(_, t)
                     if not t then return end
@@ -333,6 +341,23 @@ public final class MpvPlayer {
         script.toFile().deleteOnExit();
         Files.writeString(script, lua);
         return script.toString();
+    }
+
+    /** Writes the list external mpv's script polls for, all at once. */
+    private static void writeSubtitleList(final Path list, final List<Subtitles.Track> tracks) {
+        final StringBuilder out = new StringBuilder();
+        for (final Subtitles.Track t : tracks) {
+            out.append(String.join("\t", t.location(), t.select() ? "select" : "auto",
+                    t.title().replace('\t', ' '), t.lang() == null ? "" : t.lang()))
+                    .append('\n');
+        }
+        try {
+            final Path partial = list.resolveSibling(list.getFileName() + ".part");
+            Files.writeString(partial, out);
+            Files.move(partial, list, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+        } catch (final IOException e) {
+            System.err.println("Subtitles: " + e.getMessage());
+        }
     }
 
     private static String luaString(final String s) {

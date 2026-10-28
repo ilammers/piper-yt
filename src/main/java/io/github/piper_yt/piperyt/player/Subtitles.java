@@ -1,5 +1,7 @@
 package io.github.piper_yt.piperyt.player;
 
+import io.github.piper_yt.piperyt.service.DownloadManager;
+import io.github.piper_yt.piperyt.service.YtDlp;
 import org.schabi.newpipe.extractor.stream.StreamInfo;
 import org.schabi.newpipe.extractor.stream.SubtitlesStream;
 
@@ -8,58 +10,119 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
- * Picks YouTube's caption tracks for playback. Only the languages asked for are loaded, so a
- * video costs no extra requests while subtitles are off.
+ * Fetches YouTube's captions for playback. The caption URLs the extractor finds come back
+ * empty without a PO token, so yt-dlp downloads them, in the background while the video
+ * plays. Only the languages asked for are fetched, and nothing at all while that's blank.
  */
 public final class Subtitles {
     /**
-     * A track for mpv's {@code sub-add}: a URL or a local file, its menu title and language.
+     * A track for mpv's {@code sub-add}: a local file, its menu title and language.
      * {@code select} shows it straight away.
      */
     public record Track(String location, String title, String lang, boolean select) {
     }
 
-    private static final Pattern CUE = Pattern.compile(
-            "<p[^>]*?begin=\"([^\"]+)\"[^>]*?end=\"([^\"]+)\"[^>]*>(.*?)</p>", Pattern.DOTALL);
+    /** yt-dlp names each file {@code sub.<lang>.<ext>}. */
+    private static final String FILE_PREFIX = "sub.";
+    private static final long TIMEOUT_SECONDS = 90;
 
     private Subtitles() {
     }
 
     /**
-     * The tracks in {@code languages} (e.g. "en, de"; blank: none), in that order, manual
-     * captions before auto-generated ones. The first is selected.
+     * Fetches the tracks in {@code languages} (e.g. "en, de"; blank: none) that the video has,
+     * in that order; the first is selected. Completes with an empty list when there are none
+     * or yt-dlp fails. Cancelling it stops yt-dlp.
      */
-    public static List<Track> tracks(final StreamInfo info, final String languages) {
-        final List<String> wanted = parseLanguages(languages);
+    public static CompletableFuture<List<Track>> fetch(final StreamInfo info,
+                                                       final String languages) {
+        // Language tag -> whether YouTube only has auto-generated captions for it
+        final Map<String, Boolean> wanted = available(info, parseLanguages(languages));
         if (wanted.isEmpty()) {
+            return CompletableFuture.completedFuture(List.of());
+        }
+        if (!DownloadManager.isAvailable()) {
+            System.err.println("Subtitles need yt-dlp: sudo dnf install yt-dlp");
+            return CompletableFuture.completedFuture(List.of());
+        }
+        final CompletableFuture<List<Track>> result = new CompletableFuture<>();
+        Thread.ofVirtual().name("yt-dlp-subs").start(() -> {
+            try {
+                result.complete(download(info.getUrl(), wanted, result));
+            } catch (final IOException | RuntimeException e) {
+                System.err.println("Subtitles: " + e.getMessage());
+                result.complete(List.of());
+            } catch (final InterruptedException e) {
+                result.complete(List.of());
+            }
+        });
+        return result;
+    }
+
+    private static List<Track> download(final String url, final Map<String, Boolean> wanted,
+                                        final CompletableFuture<?> result)
+            throws IOException, InterruptedException {
+        final Path dir = Files.createTempDirectory("piper-subs-");
+        dir.toFile().deleteOnExit();
+        final Process process = new ProcessBuilder(YtDlp.subtitlesCommand(url,
+                List.copyOf(wanted.keySet()), dir))
+                .redirectErrorStream(true)
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                .start();
+        result.whenComplete((tracks, error) -> {
+            if (result.isCancelled()) {
+                process.destroy();
+            }
+        });
+        if (!process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+            process.destroy();
+            throw new IOException("yt-dlp took too long to fetch subtitles");
+        }
+        if (result.isCancelled()) {
             return List.of();
         }
-        final List<SubtitlesStream> matching = new ArrayList<>();
-        for (final SubtitlesStream s : info.getSubtitles()) {
-            if (rank(wanted, s) >= 0) {
-                matching.add(s);
-            }
-        }
-        matching.sort(Comparator.<SubtitlesStream>comparingInt(s -> rank(wanted, s))
-                .thenComparing(SubtitlesStream::isAutoGenerated));
 
-        final List<Track> result = new ArrayList<>();
-        for (final SubtitlesStream s : matching) {
-            final String location = location(s);
-            if (location == null) {
-                continue;
-            }
-            final String title = name(s) + (s.isAutoGenerated() ? " (auto-generated)" : "");
-            result.add(new Track(location, title, s.getLanguageTag(), result.isEmpty()));
+        final Map<String, Path> files = new LinkedHashMap<>();
+        try (var listing = Files.list(dir)) {
+            listing.forEach(file -> {
+                file.toFile().deleteOnExit();
+                final String lang = langOf(file.getFileName().toString());
+                if (lang != null) {
+                    files.putIfAbsent(lang, file);
+                }
+            });
         }
-        return result;
+        final List<Track> tracks = new ArrayList<>();
+        wanted.forEach((lang, autoOnly) -> {
+            final Path file = files.get(lang);
+            if (file != null) {
+                tracks.add(new Track(file.toString(),
+                        displayName(lang) + (autoOnly ? " (auto-generated)" : ""), lang,
+                        tracks.isEmpty()));
+            }
+        });
+        if (tracks.isEmpty() && process.exitValue() != 0) {
+            throw new IOException("yt-dlp couldn't fetch subtitles (exit "
+                    + process.exitValue() + ")");
+        }
+        return tracks;
+    }
+
+    /** "sub.en.vtt" -> "en", "sub.pt-BR.vtt" -> "pt-BR"; null for anything else. */
+    static String langOf(final String fileName) {
+        if (!fileName.startsWith(FILE_PREFIX)) {
+            return null;
+        }
+        final int dot = fileName.lastIndexOf('.');
+        return dot <= FILE_PREFIX.length() ? null : fileName.substring(FILE_PREFIX.length(), dot);
     }
 
     static List<String> parseLanguages(final String languages) {
@@ -74,105 +137,35 @@ public final class Subtitles {
                 .toList();
     }
 
-    /** The index of the first wanted language {@code s} is in, or -1. "en" matches "en-GB". */
-    private static int rank(final List<String> wanted, final SubtitlesStream s) {
-        final String code = s.getLanguageTag() == null ? ""
-                : s.getLanguageTag().toLowerCase(Locale.ROOT).replace('_', '-');
-        for (int i = 0; i < wanted.size(); i++) {
-            final String w = wanted.get(i);
-            if (code.equals(w) || code.startsWith(w + "-")) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    private static String name(final SubtitlesStream s) {
-        try {
-            final String name = s.getDisplayLanguageName();
-            if (name != null && !name.isBlank()) {
-                return name;
-            }
-        } catch (final RuntimeException ignored) {
-            // Fall back to the code
-        }
-        return s.getLanguageTag();
-    }
-
     /**
-     * Where mpv can read the track. The extractor asks for TTML, which mpv can't parse: URLs
-     * are switched to WebVTT, and tracks it already downloaded (to drop duplicate cues) are
-     * converted and written to a temporary file.
+     * The video's caption languages that match {@code wanted} ("en" matches "en-GB"), in the
+     * order asked for, each mapped to whether only auto-generated captions exist for it.
      */
-    private static String location(final SubtitlesStream s) {
-        final String content = s.getContent();
-        if (content == null || content.isBlank()) {
-            return null;
+    static Map<String, Boolean> available(final StreamInfo info, final List<String> wanted) {
+        final Map<String, Boolean> result = new LinkedHashMap<>();
+        if (wanted.isEmpty()) {
+            return result;
         }
-        if (s.isUrl()) {
-            return content.replaceAll("([?&])fmt=[^&]*", "$1fmt=vtt");
+        for (final String w : wanted) {
+            for (final SubtitlesStream s : info.getSubtitles()) {
+                final String tag = s.getLanguageTag();
+                if (tag == null || !matches(w, tag)) {
+                    continue;
+                }
+                final boolean autoOnly = s.isAutoGenerated();
+                result.merge(tag, autoOnly, Boolean::logicalAnd);
+            }
         }
-        try {
-            final Path file = Files.createTempFile("piper-sub-", ".vtt");
-            file.toFile().deleteOnExit();
-            Files.writeString(file, ttmlToVtt(content));
-            return file.toString();
-        } catch (final IOException e) {
-            System.err.println("Subtitles: " + e.getMessage());
-            return null;
-        }
+        return result;
     }
 
-    static String ttmlToVtt(final String ttml) {
-        final StringBuilder vtt = new StringBuilder("WEBVTT\n\n");
-        final Matcher m = CUE.matcher(ttml);
-        while (m.find()) {
-            final double begin = seconds(m.group(1));
-            final double end = seconds(m.group(2));
-            final String text = unescape(m.group(3)
-                    .replaceAll("(?i)<br\\s*/?>", "\n")
-                    .replaceAll("<[^>]+>", ""))
-                    .strip()
-                    // A blank line would end the cue
-                    .replaceAll("\n\\s*\n", "\n");
-            if (begin < 0 || end <= begin || text.isEmpty()) {
-                continue;
-            }
-            vtt.append(timestamp(begin)).append(" --> ").append(timestamp(end)).append('\n')
-                    .append(text).append("\n\n");
-        }
-        return vtt.toString();
+    private static boolean matches(final String wanted, final String tag) {
+        final String code = tag.toLowerCase(Locale.ROOT).replace('_', '-');
+        return code.equals(wanted) || code.startsWith(wanted + "-");
     }
 
-    /** Parses "HH:MM:SS.mmm", "MM:SS.mmm" or "12.5s"; -1 when it's neither. */
-    private static double seconds(final String time) {
-        try {
-            final String t = time.strip();
-            if (t.endsWith("ms")) {
-                return Double.parseDouble(t.substring(0, t.length() - 2)) / 1000;
-            }
-            if (t.endsWith("s")) {
-                return Double.parseDouble(t.substring(0, t.length() - 1));
-            }
-            double total = 0;
-            for (final String part : t.split(":")) {
-                total = total * 60 + Double.parseDouble(part);
-            }
-            return total;
-        } catch (final NumberFormatException e) {
-            return -1;
-        }
-    }
-
-    private static String timestamp(final double seconds) {
-        final long ms = Math.round(seconds * 1000);
-        return String.format(Locale.ROOT, "%02d:%02d:%02d.%03d",
-                ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000);
-    }
-
-    /** Leaves &amp;, &lt; and &gt; escaped, as WebVTT wants them. */
-    private static String unescape(final String text) {
-        return text.replace("&quot;", "\"").replace("&#39;", "'").replace("&apos;", "'")
-                .replace("&#34;", "\"").replace("&nbsp;", " ");
+    private static String displayName(final String tag) {
+        final String name = Locale.forLanguageTag(tag).getDisplayName(Locale.ENGLISH);
+        return name.isBlank() ? tag : name;
     }
 }

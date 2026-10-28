@@ -74,6 +74,26 @@ public final class YtDlp {
     private YtDlp() {
     }
 
+    /**
+     * Fetches only the captions in {@code languages} (exact YouTube tags) into
+     * {@code directory}, as {@code sub.<lang>.vtt}. Auto-generated ones are used where a
+     * language has no others.
+     */
+    public static List<String> subtitlesCommand(final String url, final List<String> languages,
+                                                final Path directory)
+            throws java.io.IOException {
+        final List<String> cmd = new ArrayList<>();
+        cmd.add("yt-dlp");
+        cmd.addAll(Network.ytDlpArgs());
+        cmd.addAll(List.of("--no-playlist", "--no-colors", "--no-progress", "--skip-download",
+                "--write-subs", "--write-auto-subs", "--sub-format", "vtt/best",
+                "--sub-langs", String.join(",", languages), "--no-sponsorblock",
+                "-P", directory.toString(), "-o", "sub"));
+        cmd.add("--");
+        cmd.add(url);
+        return cmd;
+    }
+
     public static List<String> command(final String url, final Options o)
             throws java.io.IOException {
         final List<String> cmd = new ArrayList<>();
