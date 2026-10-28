@@ -1,18 +1,14 @@
-# Piper-YT
+# Piper
 
-**PipePipe for Linux.** A native GTK4 / libadwaita YouTube client for the Linux desktop, built
-on [PipePipeExtractor](https://github.com/InfinityLoop1308/PipePipeExtractor), the extraction
-library behind the [PipePipe](https://codeberg.org/NullPointerException/PipePipe) Android app.
-No account, no ads, no tracking, and recommendations computed on your own computer.
+Piper is the definitive, privacy-first YouTube client for the Linux desktop. 
 
 > Piper-YT is an independent project. It is not affiliated with or endorsed by PipePipe,
 > NewPipe, YouTube or Google.
 
 ## Features
 
-- **Search** for videos, channels and playlists, and browse channels, playlists, comments and
-  replies.
-- **Plays inside the window** through libmpv, with theater mode, fullscreen, quality
+- **Search** for videos, channels and playlists, and browse channels, playlists, comments and replies.
+- **Playback** through libmpv, with theater mode, fullscreen, quality
   selection, audio-only playback and a **mini player** that keeps a video going while you
   browse. [SponsorBlock](https://sponsor.ajay.app) skips the segment categories you choose.
 - **Up next** beside the video (or below it on narrow windows), with **autoplay**.
@@ -27,19 +23,16 @@ No account, no ads, no tracking, and recommendations computed on your own comput
   moves between your phone and your desktop. Also a plain JSON export.
 - **Themes**: Ember Muted, Gruvbox Dark and Gruvbox Light built in, plus your own.
 
-Members-only videos are hidden, since they can't be watched without signing in.
+Members-only videos are hidden, since they can't be viewed without signing in. Similarly, age-restricted videos are shown but cannot be viewed. 
 
 ## Privacy
 
-- Every connection (the app's requests, thumbnails, SponsorBlock, mpv's video streams and
-  yt-dlp's downloads) takes one route you choose: the system route (for example a VPN), or a
-  SOCKS5 proxy that fails closed and resolves hostnames through the proxy.
+- Every connection (the app's requests, thumbnails, SponsorBlock, mpv's video streams and yt-dlp's downloads) takes one route you choose: the system route (for example a VPN), or a SOCKS5 proxy that fails closed and resolves hostnames through the proxy.
 - No cookies are kept and no identifiers are stored between requests.
 - Background work (feed refreshes, Home) is paced: one request at a time, shuffled, with
   random gaps.
 - Watch history never leaves the machine. With it off, nothing is recorded at all.
-- Preferences → Network → Log connections prints every outbound connection and the route it
-  took, so you can check for yourself.
+- Preferences → Network → Log connections prints every outbound connection and the route it took, so you can check for yourself.
 
 The details are in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#privacy).
 
@@ -80,11 +73,29 @@ rm -rf ~/.local/share/piper-yt ~/.local/bin/piper-yt \
 
 Your library is kept separately (see below); delete it too if you want everything gone.
 
-## Your data
+## Data Collection
 
 Everything is in one SQLite file, `library.db`, in
 `~/.local/share/io.github.piper_yt.PiperYT/`. Set `PIPER_DATA_DIR` to use
-another folder. Preferences → Data imports and exports backups, and can wipe the library.
+another folder. 
+
+Preferences → Data imports and exports backups, and can wipe the library.
+
+## Ethical Considerations
+
+You are about to break YouTube's Terms of Service.
+
+This program directly serves to circumvent the ad-surveilance model that creators and YouTube uses to monetize watch time. Moreover, local subscriptions do not contribute to the creator's subscriber count since Favorites are local and not linked to an account. 
+
+If you use this software, be courtuious enough to support your favorite creators via a means other than contributing to view totals beit: merch, Patreon, channel membership, etc. 
+
+## Implementation
+
+The original concept for Piper was as follows: Rust + libmpv, backed by RustyPipe for the extractor. However, it became apparent that RustyPipe did not have the maint. cadence to function as the backbone for this project. 
+
+As a result, Kotlin became the only viable option for implementation to better integrate with the more actively maintained PipePipeExtractor which remains this project's core dependency. 
+
+If RustyPipe ever gains more traction, it will be reconsidered. 
 
 ## Contributing
 
@@ -104,6 +115,6 @@ embedding libmpv, and more). Run `./gradlew test` before sending changes.
 
 ## License
 
-Piper-YT is free software under the [GNU General Public License v3.0](LICENSE).
+Piper-YT is free software under the [GNU General Public License v3.0](LICENSE). The
+bundled PipePipeExtractor is also GPLv3 (see `PipePipeExtractor/LICENSE`).
 
-The bundled PipePipeExtractor is also GPLv3 (see `PipePipeExtractor/LICENSE`).
