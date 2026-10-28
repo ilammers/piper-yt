@@ -1,5 +1,6 @@
 package io.github.piper_yt.piperyt.player;
 
+import io.github.piper_yt.piperyt.db.Settings;
 import io.github.piper_yt.piperyt.net.Network;
 import io.github.piper_yt.piperyt.util.Theme;
 import io.github.piper_yt.piperyt.util.Themes;
@@ -157,10 +158,15 @@ public final class MpvPlayer {
 
     /**
      * What to play: {@code url} plus, for YouTube's split streams, a separate audio track.
-     * {@code coverUrl} is shown as the picture for audio-only playback.
+     * {@code coverUrl} is shown as the picture for audio-only playback. {@code subtitles} are
+     * added once the file has loaded.
      */
     public record Source(String title, String url, String audioUrl, String coverUrl,
-                         boolean noVideo) {
+                         boolean noVideo, List<Subtitles.Track> subtitles) {
+        public Source(final String title, final String url, final String audioUrl,
+                      final String coverUrl, final boolean noVideo) {
+            this(title, url, audioUrl, coverUrl, noVideo, List.of());
+        }
     }
 
     /** A SponsorBlock segment to skip, in seconds. */
@@ -186,7 +192,8 @@ public final class MpvPlayer {
         final VideoStream video = quality.stream();
         final AudioStream audio = video.isVideoOnly() ? bestAudio(info) : null;
         return new Source(title, video.getContent(),
-                audio == null ? null : audio.getContent(), null, false);
+                audio == null ? null : audio.getContent(), null, false,
+                Subtitles.tracks(info, Settings.getString(Settings.PLAYER_SUB_LANGS)));
     }
 
     public static List<SkipSegment> skipSegments(final StreamInfo info) {
@@ -242,7 +249,7 @@ public final class MpvPlayer {
         if (startSeconds > 0) {
             cmd.add(String.format(Locale.ROOT, "--start=%.1f", startSeconds));
         }
-        cmd.add("--script=" + externalScript(skip));
+        cmd.add("--script=" + externalScript(skip, source.subtitles()));
         cmd.add(source.url());
 
         final Process process = new ProcessBuilder(cmd)
@@ -274,14 +281,28 @@ public final class MpvPlayer {
      * Writes a throwaway Lua script for external mpv: skips the segments, and prints the
      * position for {@link #readProgress} every few seconds, on pause and on quit.
      */
-    private static String externalScript(final List<SkipSegment> skip) throws IOException {
+    private static String externalScript(final List<SkipSegment> skip,
+                                         final List<Subtitles.Track> subtitles)
+            throws IOException {
         final StringBuilder lua = new StringBuilder("local segments = {\n");
         for (final SkipSegment s : skip) {
             lua.append(String.format(Locale.ROOT, "  {%.3f, %.3f, \"%s\"},%n",
                     s.start(), s.end(), s.label()));
         }
+        lua.append("}\nlocal subtitles = {\n");
+        for (final Subtitles.Track t : subtitles) {
+            lua.append("  {").append(luaString(t.location())).append(", ")
+                    .append(luaString(t.select() ? "select" : "auto")).append(", ")
+                    .append(luaString(t.title())).append(", ")
+                    .append(luaString(t.lang() == null ? "" : t.lang())).append("},\n");
+        }
         lua.append("""
                 }
+                mp.register_event("file-loaded", function()
+                    for _, s in ipairs(subtitles) do
+                        mp.commandv("sub-add", s[1], s[2], s[3], s[4])
+                    end
+                end)
                 mp.observe_property("time-pos", "number", function(_, t)
                     if not t then return end
                     for _, s in ipairs(segments) do
@@ -312,6 +333,20 @@ public final class MpvPlayer {
         script.toFile().deleteOnExit();
         Files.writeString(script, lua);
         return script.toString();
+    }
+
+    private static String luaString(final String s) {
+        final StringBuilder out = new StringBuilder("\"");
+        for (final char c : s.toCharArray()) {
+            switch (c) {
+                case '\\' -> out.append("\\\\");
+                case '"' -> out.append("\\\"");
+                case '\n' -> out.append("\\n");
+                case '\r' -> out.append("\\r");
+                default -> out.append(c);
+            }
+        }
+        return out.append('"').toString();
     }
 
     private static String categoryLabel(final SponsorBlockCategory category) {

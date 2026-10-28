@@ -134,6 +134,12 @@ final class Preferences {
                 + "video in Up next after a short countdown", Settings.AUTOPLAY));
         group.add(toggle("Mini player", "Keep a playing video going in a corner of the window "
                 + "when you leave its page", Settings.MINI_PLAYER));
+        final EntryRow subs = new EntryRow();
+        subs.setTitle("Subtitle languages, e.g. \"en, de\" (blank: off)");
+        subs.setText(Settings.getString(Settings.PLAYER_SUB_LANGS));
+        subs.setShowApplyButton(true);
+        subs.onApply(() -> Settings.set(Settings.PLAYER_SUB_LANGS, subs.getText().strip()));
+        group.add(subs);
         return group;
     }
 

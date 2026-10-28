@@ -3,6 +3,7 @@ package io.github.piper_yt.piperyt.ui;
 import io.github.piper_yt.piperyt.net.Network;
 import io.github.piper_yt.piperyt.player.Mpv;
 import io.github.piper_yt.piperyt.player.MpvPlayer;
+import io.github.piper_yt.piperyt.player.Subtitles;
 import io.github.piper_yt.piperyt.util.Theme;
 import io.github.piper_yt.piperyt.util.Themes;
 import org.gnome.gdk.Gdk;
@@ -21,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Plays inside the window: libmpv renders into a {@link GLArea}, and mouse and keyboard input
@@ -79,6 +81,9 @@ final class PlayerView {
     private Thread events;
     private volatile boolean closing;
     private volatile List<MpvPlayer.SkipSegment> skipSegments = List.of();
+    /** Subtitles for the file being loaded, added (by the event thread) once it has. */
+    private final AtomicReference<List<Subtitles.Track>> pendingSubtitles =
+            new AtomicReference<>(List.of());
     private boolean fullscreen;
     private final boolean controls;
     private String videoTrack;
@@ -149,6 +154,7 @@ final class PlayerView {
                 source.coverUrl() == null ? List.of() : List.of(source.coverUrl()));
         videoTrack = null;
         mpv.setProperty("vid", source.noVideo() ? "no" : "auto");
+        pendingSubtitles.set(source.noVideo() ? List.of() : source.subtitles());
         mpv.command("loadfile", source.url());
         mpv.setProperty("pause", "no");
         area.grabFocus();
@@ -320,6 +326,7 @@ final class PlayerView {
                         Ui.runOnMain(listener::ended);
                     }
                 }
+                case Mpv.EVENT_FILE_LOADED -> addSubtitles(core);
                 case Mpv.EVENT_END_FILE -> {
                     if (event.endReason() == Mpv.END_FILE_REASON_ERROR) {
                         final String error = Mpv.errorString(event.endError());
@@ -328,6 +335,18 @@ final class PlayerView {
                 }
                 default -> {
                 }
+            }
+        }
+    }
+
+    private void addSubtitles(final Mpv core) {
+        for (final Subtitles.Track t : pendingSubtitles.getAndSet(List.of())) {
+            try {
+                core.command("sub-add", t.location(), t.select() ? "select" : "auto",
+                        t.title(), t.lang() == null ? "" : t.lang());
+            } catch (final IllegalStateException e) {
+                System.err.println("Subtitles: couldn't load " + t.title() + ": "
+                        + e.getMessage());
             }
         }
     }

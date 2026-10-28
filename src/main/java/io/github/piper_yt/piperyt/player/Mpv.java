@@ -25,6 +25,7 @@ public final class Mpv {
     public static final int EVENT_NONE = 0;
     public static final int EVENT_SHUTDOWN = 1;
     public static final int EVENT_END_FILE = 7;
+    public static final int EVENT_FILE_LOADED = 8;
     public static final int EVENT_PROPERTY_CHANGE = 22;
 
     public static final int FORMAT_NONE = 0;

@@ -33,6 +33,8 @@ public final class Settings {
     /** The window corner the mini player snaps to, e.g. "bottom-right". */
     public static final Key<String> MINI_PLAYER_CORNER =
             new Key<>("player.mini_corner", "bottom-right");
+    /** Caption languages to load when playing, e.g. "en, de". Blank: no subtitles. */
+    public static final Key<String> PLAYER_SUB_LANGS = new Key<>("player.sub_langs", "");
 
     public static final Key<Integer> FEED_INTERVAL_MIN = new Key<>("feed.interval_min", 90);
     public static final Key<Integer> FEED_GAP_MIN_S = new Key<>("feed.gap_min_s", 2);
