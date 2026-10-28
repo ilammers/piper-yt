@@ -91,11 +91,12 @@ If you use this software, be courtuious enough to support your favorite creators
 
 ## Implementation
 
-The original concept for Piper was as follows: Rust + libmpv, backed by RustyPipe for the extractor. However, it became apparent that RustyPipe did not have the maint. cadence to function as the backbone for this project. 
+The original concept for Piper was Rust + libmpv, with RustyPipe as the extractor. However, it became apparent that RustyPipe didn't have the maintenance cadence to serve as the backbone for this project.
 
-As a result, Kotlin became the only viable option for implementation to better integrate with the more actively maintained PipePipeExtractor which remains this project's core dependency. 
+Piper is instead written in Java, so it can use the more actively maintained PipePipeExtractor, which is also Java and remains the project's core dependency. The UI is GTK4/libadwaita via java-gi, and playback still uses libmpv.
 
-If RustyPipe ever gains more traction, it will be reconsidered. 
+If RustyPipe gains more traction, a Rust version may be reconsidered.
+
 
 ## Contributing
 
