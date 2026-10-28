@@ -22,6 +22,7 @@ Piper is the definitive, privacy-first YouTube client for the Linux desktop.
 - **Backups**: imports PipePipe and NewPipe backups, and exports to either, so your library
   moves between your phone and your desktop. Also a plain JSON export.
 - **Themes**: Ember Muted, Gruvbox Dark and Gruvbox Light built in, plus your own.
+- **Sleep timer:** Automatically shutdown the computer at the end of the video, or after a set 15m-2hr time frame.  
 
 Members-only videos are hidden, since they can't be viewed without signing in. Similarly, age-restricted videos are shown but cannot be viewed. 
 
