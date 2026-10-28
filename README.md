@@ -85,9 +85,9 @@ Preferences → Data imports and exports backups, and can wipe the library.
 
 You are about to break YouTube's Terms of Service.
 
-This program directly serves to circumvent the ad-surveilance model that creators and YouTube uses to monetize watch time. Moreover, local subscriptions do not contribute to the creator's subscriber count since Favorites are local and not linked to an account. 
+This program directly serves to circumvent the ad-surveillance model that creators and YouTube use to monetize watch time. Moreover, local subscriptions do not contribute to the creator's subscriber count since Favorites are local and not linked to an account. 
 
-If you use this software, be courtuious enough to support your favorite creators via a means other than contributing to view totals beit: merch, Patreon, channel membership, etc. 
+If you use this software, be courteous enough to support your favorite creators via a means other than contributing to view totals, be it: merch, Patreon, channel membership, etc. 
 
 ## Implementation
 
